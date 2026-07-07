@@ -118,6 +118,7 @@ pub const pico8_colors = struct {
 // Shapes
 //
 
+/// Draw triangle filled. Vertices in counter-clockwise order.
 pub fn triangle(v1: Vector2, v2: Vector2, v3: Vector2, color: Color) void {
     rl.drawTriangle(v1, v2, v3, color);
 }

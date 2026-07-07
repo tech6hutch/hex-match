@@ -30,14 +30,20 @@ const rectBottomRight = math.rectBottomRight;
 const rectCenter = math.rectCenter;
 const floorVec = math.floorVec;
 
-const tile_set_data = @import("tile_set_data.zig");
 const levels_raw = @import("levels.zig");
 const Entity = @import("engine/Entity.zig");
+
+const COLUMN_COUNT = 10;
+const ROW_COUNT = 10;
+const PADDING_H = 10;
+const PADDING_V = PADDING_H;
+const SHAPE_WIDTH = 20;
+const SHAPE_HEIGHT = SHAPE_WIDTH;
 
 pub fn run() void {
     while (true) {
         var merging_squares_buffer: [10]LevelState.Merging = undefined;
-        var hexagons_buffer: [10]LevelState.Shape = undefined;
+        var hexagons_buffer: [10]Shape = undefined;
         var vfx_buffer: [10]Entity = undefined;
         var sfx_buffer: [10]rl.Sound = undefined;
         LevelState.is_defined = true;
@@ -62,6 +68,20 @@ pub fn run() void {
 }
 
 fn runLevel() bool {
+    var bg_hue = Color.red.toHSV().x;
+
+    for (&level.squares) |*column| {
+        for (column) |*square| {
+            square.* = Shape{
+                .kind = .square,
+                .color = Color.fromHSV(core.rng.float(f32) * 360.0, 1.0, 1.0),
+                .x_px = 0,
+                .y_px = 0,
+                .clickable = true,
+            };
+        }
+    }
+
     const high_res_text_scale = draw.high_res_text_scale;
 
     // Text is drawn at higher resolution. We scale the game screen and copy the drawn text over it.
@@ -111,7 +131,8 @@ fn runLevel() bool {
         {
             defer rl.endTextureMode();
 
-            rl.clearBackground(.blue);
+            bg_hue += 0.5;
+            rl.clearBackground(Color.fromHSV(bg_hue, 0.5, 0.5));
 
             // Draw vfx, behind entities
             {
@@ -126,11 +147,21 @@ fn runLevel() bool {
                 }
             }
 
-            for (&level.squares, 0..) |*column, x| {
-                for (column, 0..) |*square, y| {
-                    _ = x;
-                    _ = y;
-                    drawShape(square.*);
+            const GRID_HEIGHT = SHAPE_HEIGHT * ROW_COUNT +
+                PADDING_V * (ROW_COUNT - 1);
+            comptime std.debug.assert(GRID_HEIGHT <= game_height);
+            const MARGIN_V = (game_height - GRID_HEIGHT) / 2;
+            const GRID_WIDTH = SHAPE_WIDTH * COLUMN_COUNT +
+                PADDING_H * (COLUMN_COUNT - 1);
+            comptime std.debug.assert(GRID_WIDTH <= game_width);
+            const MARGIN_H = (game_width - GRID_WIDTH) / 2;
+
+            inline for (&level.squares, 0..) |*column, x| {
+                inline for (column, 0..) |*square, y| {
+                    drawShape(square.*, .{ .at = .{
+                        MARGIN_H + (SHAPE_WIDTH + PADDING_H) * x,
+                        MARGIN_V + (SHAPE_HEIGHT + PADDING_V) * y,
+                    } });
                 }
             }
 
@@ -248,7 +279,7 @@ const game = @This();
 pub var level: LevelState = undefined;
 
 pub const LevelState = struct {
-    squares: [10][10]Shape = @splat(@splat(Shape{})),
+    squares: [COLUMN_COUNT][ROW_COUNT]Shape = @splat(@splat(Shape{})),
     merging_squares: std.ArrayList(Merging) = .empty,
     hexagons: std.ArrayList(Shape) = .empty,
 
@@ -263,15 +294,6 @@ pub const LevelState = struct {
     _defined_check: bool = true,
 
     pub var is_defined: bool = false;
-
-    pub const Shape = struct {
-        kind: enum { empty, horizontal_square, vertical_square, hexagon } = .empty,
-        color: Color = .black,
-        x_px: f32 = 0,
-        y_px: f32 = 0,
-        scale: f32 = 1,
-        clickable: bool = false,
-    };
 
     pub const Merging = struct {
         mover: Shape,
@@ -343,23 +365,45 @@ pub const LevelState = struct {
     }
 };
 
+pub const Shape = struct {
+    kind: enum {
+        empty,
+        square,
+        diamond,
+        hexagon,
+    } = .empty,
+    color: Color = .black,
+    x_px: f32 = 0,
+    y_px: f32 = 0,
+    scale: f32 = 1,
+    clickable: bool = false,
+};
+
 //
 // Drawing
 //
 
-fn drawShape(shape: LevelState.Shape) void {
-    const SHAPE_WIDTH = 16.0;
-    const SHAPE_HEIGHT = 16.0;
+fn drawShape(
+    shape: Shape,
+    position: union(enum) {
+        at_its_own_position,
+        at: struct { f32, f32 },
+    },
+) void {
+    const x: f32, const y: f32 = switch (position) {
+        .at_its_own_position => .{ shape.x_px, shape.y_px },
+        .at => |pos| pos,
+    };
     switch (shape.kind) {
         .empty => {},
-        .horizontal_square => {
+        .square => {
             draw.rectangle(.{
-                .x = shape.x_px - SHAPE_WIDTH / 2,
-                .y = shape.y_px - SHAPE_HEIGHT / 2,
+                .x = @trunc(x - SHAPE_WIDTH / 2),
+                .y = @trunc(y - SHAPE_HEIGHT / 2),
                 .width = SHAPE_WIDTH,
                 .height = SHAPE_HEIGHT,
             }, shape.color);
         },
-        .vertical_square, .hexagon => @panic("not implemented yet"),
+        .diamond, .hexagon => @panic("not implemented yet"),
     }
 }

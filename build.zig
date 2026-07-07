@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const exe_name = @tagName(@import("./build.zig.zon").name);
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -22,7 +24,7 @@ pub fn build(b: *std.Build) void {
     });
     exe_mod.linkLibrary(raylib_c);
     const exe = b.addExecutable(.{
-        .name = "mail_bros",
+        .name = exe_name,
         .root_module = exe_mod,
     });
     b.installArtifact(exe);

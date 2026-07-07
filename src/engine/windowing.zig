@@ -25,7 +25,7 @@ pub fn fixWindowRatioIfResized() void {
 }
 
 /// The scale at which to draw game pixels as screen pixels.
-pub var display_scale: i32 = 4;
+pub var display_scale: i32 = 1;
 pub inline fn fDisplayScale() f32 {
     return @floatFromInt(display_scale);
 }

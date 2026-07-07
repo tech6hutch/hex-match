@@ -25,8 +25,8 @@ pub const debug = struct {
     pub const allocator = c_allocator;
 };
 
-pub const game_width = 240;
-pub const game_height = 180;
+pub const game_width = 720;
+pub const game_height = 720;
 pub const game_center = Vector2{
     .x = game_width / 2.0,
     .y = game_height / 2.0,
@@ -45,6 +45,7 @@ pub const FRAME_DELTA = 1.0 / 60.0;
 pub var t: u32 = 0;
 /// Call setup() before using.
 pub var rng: std.Random = undefined;
+var rng_impl: std.Random.IoSource = undefined;
 pub var lang: i18n.Lang = .en;
 
 /// Returns an error message if anything went wrong.
@@ -56,12 +57,21 @@ pub fn setup(
     comptime sound_names: []const []const u8,
     localizations_path: ?[]const u8,
 ) ?[:0]const u8 {
-    var rng_impl: std.Random.IoSource = .{ .io = io };
+    rng_impl = .{ .io = io };
     rng = rng_impl.interface();
 
     rl.setTraceLogLevel(.warning);
     rl.setConfigFlags(.{ .window_resizable = true });
-    rl.initWindow(game_width * windowing.display_scale, game_height * windowing.display_scale, window_title);
+    {
+        const window_width = game_width * windowing.display_scale;
+        const window_height = game_height * windowing.display_scale;
+        // If the window is bigger than the screen, it doesn't load correctly. (2026-07-07)
+        if (window_width > 720 or window_height > 720) std.debug.panic(
+            "{d}x{d} is kinda big, are you sure?",
+            .{ window_width, window_height },
+        );
+        rl.initWindow(window_width, window_height, window_title);
+    }
     rl.setTargetFPS(FRAMES_PER_SEC);
     rl.setExitKey(.null);
 

@@ -10,7 +10,7 @@ pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const setup_err_msg = core.setup(
         io,
-        "Mail Bros.",
+        "Hex Match",
         "./assets/press_start_2p/PressStart2P.ttf",
         &.{
             "menu.png",
