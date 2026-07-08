@@ -118,6 +118,10 @@ pub const pico8_colors = struct {
 // Shapes
 //
 
+pub fn line(startPos: Vector2, endPos: Vector2, thick: f32, color: Color) void {
+    rl.drawLineEx(startPos, endPos, thick, color);
+}
+
 /// Draw triangle filled. Vertices in counter-clockwise order.
 pub fn triangle(v1: Vector2, v2: Vector2, v3: Vector2, color: Color) void {
     rl.drawTriangle(v1, v2, v3, color);
@@ -131,6 +135,11 @@ pub fn rectangle(rect: Rectangle, color: Color) void {
 /// Draw rectangle outline.
 pub fn rectangleLines(rect: Rectangle, lineThick: f32, color: Color) void {
     rl.drawRectangleLinesEx(rect, lineThick, color);
+}
+
+/// Draw a rectangle filled with a gradient.
+pub fn rectangleGradient(rect: Rectangle, topLeft: Color, bottomLeft: Color, bottomRight: Color, topRight: Color) void {
+    rl.drawRectangleGradientEx(rect, topLeft, bottomLeft, bottomRight, topRight);
 }
 
 //

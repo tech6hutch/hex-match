@@ -53,7 +53,31 @@ pub fn rectCenter(rect: Rectangle) Vector2 {
 pub fn vecXY(vec: Vector2) struct { f32, f32 } {
     return .{ vec.x, vec.y };
 }
+pub fn vecXYZ(vec: rl.Vector3) struct { f32, f32, f32 } {
+    return .{ vec.x, vec.y, vec.z };
+}
 
 pub fn floorVec(vec: Vector2) Vector2 {
     return .init(@floor(vec.x), @floor(vec.y));
+}
+
+/// Hues must be in the form 0..360. Handles wrapping around at the edges.
+pub fn mixHues(a: f32, b: f32) f32 {
+    if (@abs(a - b) <= 180) return (a + b) / 2;
+
+    var hue = (a + b + 360) / 2;
+    if (hue >= 360) hue -= 360;
+    return hue;
+}
+/// Hues must be in the form 0..360. Handles wrapping around at the edges.
+pub fn hueDistance(a: f32, b: f32) f32 {
+    if (@abs(a - b) <= 180) return @abs(a - b);
+
+    var smaller, const bigger =
+        if (a < b)
+            .{ a, b }
+        else
+            .{ b, a };
+    smaller += 360;
+    return @abs(smaller - bigger);
 }

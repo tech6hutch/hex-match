@@ -37,9 +37,9 @@ pub const game_size_in_tiles = Vector2{
 };
 
 /// The target FPS. Dev(s): lower this (separately from FRAME_DELTA) for slow-mo.
-pub const FRAMES_PER_SEC = 60;
+pub const FRAMES_PER_SEC = 120;
 /// The (minimum) time, in seconds, between frames. This game uses a fixed time-step.
-pub const FRAME_DELTA = 1.0 / 60.0;
+pub const FRAME_DELTA = 1.0 / 120.0;
 
 /// Frames since game start. May crash if the game runs for over two years.
 pub var t: u32 = 0;

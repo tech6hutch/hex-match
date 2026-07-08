@@ -39,6 +39,21 @@ const PADDING_H = 10;
 const PADDING_V = PADDING_H;
 const SHAPE_WIDTH = 20;
 const SHAPE_HEIGHT = SHAPE_WIDTH;
+const SELECT_WIDTH = SHAPE_WIDTH + PADDING_H;
+const SELECT_HEIGHT = SHAPE_HEIGHT + PADDING_V;
+
+const GRID_HEIGHT = SHAPE_HEIGHT * ROW_COUNT +
+    PADDING_V * (ROW_COUNT - 1);
+comptime {
+    std.debug.assert(GRID_HEIGHT <= game_height);
+}
+const MARGIN_V = (game_height - GRID_HEIGHT) / 2;
+const GRID_WIDTH = SHAPE_WIDTH * COLUMN_COUNT +
+    PADDING_H * (COLUMN_COUNT - 1);
+comptime {
+    std.debug.assert(GRID_WIDTH <= game_width);
+}
+const MARGIN_H = (game_width - GRID_WIDTH) / 2;
 
 pub fn run() void {
     while (true) {
@@ -70,13 +85,14 @@ pub fn run() void {
 fn runLevel() bool {
     var bg_hue = Color.red.toHSV().x;
 
-    for (&level.squares) |*column| {
+    var selected_square: ?GridPosition = null;
+    var wrong_choice_timer: f32 = 0;
+
+    for (&level.grid) |*column| {
         for (column) |*square| {
             square.* = Shape{
-                .kind = .square,
+                .kind = if (core.rng.boolean()) .square else .diamond,
                 .color = Color.fromHSV(core.rng.float(f32) * 360.0, 1.0, 1.0),
-                .x_px = 0,
-                .y_px = 0,
                 .clickable = true,
             };
         }
@@ -100,11 +116,134 @@ fn runLevel() bool {
             .exit_level => return false,
         };
 
+        const HOVER_FADEOUT_SECS: comptime_float = 0.1;
+        var hovered_square: ?GridPosition = null;
+
         // Update
         if (do_update) {
             std.debug.assert(!core.isPaused());
             if (inputs.buttonPressed(.pause, .{})) {
                 core.pause();
+            }
+
+            update_shapes: {
+                wrong_choice_timer -= FRAME_DELTA;
+                if (wrong_choice_timer <= 0) {
+                    wrong_choice_timer = 0;
+                    for (&level.grid) |*column| {
+                        for (column) |*shape| {
+                            if (shape.effect == .wrong) shape.unmarkWrong();
+                        }
+                    }
+                } else {
+                    var count: usize = 0;
+                    for (level.grid) |column| {
+                        for (column) |shape| {
+                            if (shape.effect == .wrong) count += 1;
+                        }
+                    }
+                    std.debug.assert(count > 0);
+                }
+
+                const mouse_pos = rl.getMousePosition();
+                var maybe_clicked_pos: ?GridPosition = null;
+                inline for (&level.grid, 0..) |*column, grid_x| {
+                    inline for (column, 0..) |*shape, grid_y| cont: {
+                        const grid_pos = GridPosition{ .x = grid_x, .y = grid_y };
+                        const center = gridCenter(grid_pos);
+                        const a_wrong_choice_was_made = wrong_choice_timer > 0;
+                        if (!a_wrong_choice_was_made) std.debug.assert(shape.effect != .wrong);
+                        if (a_wrong_choice_was_made or !shape.clickable) {
+                            if (shape.effect == .hovered) shape.effect = .none;
+                            break :cont; // not interactable
+                        }
+
+                        switch (shape.effect) {
+                            .none => {},
+                            .hovered => |*hovered| {
+                                hovered.fadeout -= FRAME_DELTA;
+                                if (hovered.fadeout <= 0) shape.effect = .none;
+                            },
+                            .wrong => unreachable,
+                        }
+                        if (!(@abs(center.x - mouse_pos.x) < SELECT_WIDTH / 2 and
+                            @abs(center.y - mouse_pos.y) < SELECT_HEIGHT / 2))
+                            break :cont; // not hovered
+                        if (!rl.isMouseButtonPressed(.left)) {
+                            hovered_square = grid_pos;
+                            shape.effect = .{ .hovered = .{ .fadeout = HOVER_FADEOUT_SECS } };
+                            break :cont; // not clicked
+                        }
+                        maybe_clicked_pos = grid_pos;
+                    }
+                }
+
+                const clicked_pos = maybe_clicked_pos orelse break :update_shapes;
+                const clicked = level.gridGet(clicked_pos);
+                clicked.effect = .none;
+                const other_pos = selected_square orelse {
+                    // None already selected
+                    switch (clicked.kind) {
+                        .empty => @panic("clicked empty square"),
+                        .square, .diamond => {
+                            selected_square = clicked_pos;
+                        },
+                        .hexagon => {
+                            clearAdjacentHexagonsOfSimilarColor(clicked_pos, clicked.color);
+                        },
+                    }
+                    break :update_shapes;
+                };
+                selected_square = null;
+                if (other_pos == clicked_pos) {
+                    break :update_shapes; // just deselect it
+                }
+
+                const other = level.gridGet(other_pos);
+                const valid_match =
+                    clicked.kind == .diamond and other.kind == .square or
+                    clicked.kind == .square and other.kind == .diamond;
+                if (!valid_match) {
+                    clicked.markWrong();
+                    other.markWrong();
+                    wrong_choice_timer = 1.0;
+                    break :update_shapes; // invalid match
+                }
+
+                other.clickable = false;
+                level.merging_squares.appendBounded(.{
+                    .shape = clicked.*,
+                    .start = gridCenter(clicked_pos),
+                    .end = gridCenter(other_pos),
+                    .start_t = core.t,
+                    .dest_grid_pos = other_pos,
+                }) catch @panic("too many merging shapes");
+                clicked.* = .{};
+            }
+
+            // Update moving shapes
+            {
+                var i: usize = level.merging_squares.items.len;
+                while (i > 0) {
+                    i -= 1;
+                    var merging = &level.merging_squares.items[i];
+                    const pos = &merging.position;
+                    const anim_position = util.toF32(core.t - merging.start_t) / FRAMES_PER_SEC;
+                    const anim_duration = 0.2;
+                    pos.* = Vector2.lerp(merging.start, merging.end, @min(anim_position / anim_duration, 1));
+
+                    if (anim_position >= anim_duration) {
+                        const merging_copy = level.merging_squares.swapRemove(i);
+                        merging = undefined; // there's now a different one (or nothing) in that slot.
+
+                        const new_hexagon = level.gridGet(merging_copy.dest_grid_pos);
+                        new_hexagon.kind = .hexagon;
+                        const old_h, const s, const v = math.vecXYZ(new_hexagon.color.toHSV());
+                        const merging_h = merging_copy.shape.color.toHSV().x;
+                        new_hexagon.color = Color.fromHSV(math.mixHues(old_h, merging_h), s, v);
+                        new_hexagon.clickable = true;
+                    }
+                }
             }
 
             // Update HUD
@@ -131,7 +270,7 @@ fn runLevel() bool {
         {
             defer rl.endTextureMode();
 
-            bg_hue += 0.5;
+            bg_hue += 60.0 / 2 * FRAME_DELTA;
             rl.clearBackground(Color.fromHSV(bg_hue, 0.5, 0.5));
 
             // Draw vfx, behind entities
@@ -147,22 +286,77 @@ fn runLevel() bool {
                 }
             }
 
-            const GRID_HEIGHT = SHAPE_HEIGHT * ROW_COUNT +
-                PADDING_V * (ROW_COUNT - 1);
-            comptime std.debug.assert(GRID_HEIGHT <= game_height);
-            const MARGIN_V = (game_height - GRID_HEIGHT) / 2;
-            const GRID_WIDTH = SHAPE_WIDTH * COLUMN_COUNT +
-                PADDING_H * (COLUMN_COUNT - 1);
-            comptime std.debug.assert(GRID_WIDTH <= game_width);
-            const MARGIN_H = (game_width - GRID_WIDTH) / 2;
+            // Draw lines between similar hexagons
+            inline for (0..level.grid.len) |grid_x| {
+                inline for (0..level.grid[0].len) |grid_y| cont: { // can't use "continue" because of "inline"
+                    const shape = level.grid[grid_x][grid_y];
+                    const shape_pos = gridCenter(.{ .x = grid_x, .y = grid_y });
+                    if (shape.kind != .hexagon) break :cont;
 
-            inline for (&level.squares, 0..) |*column, x| {
-                inline for (column, 0..) |*square, y| {
-                    drawShape(square.*, .{ .at = .{
-                        MARGIN_H + (SHAPE_WIDTH + PADDING_H) * x,
-                        MARGIN_V + (SHAPE_HEIGHT + PADDING_V) * y,
-                    } });
+                    for (RIGHT_DOWN) |dir| {
+                        const dx, const dy = dir;
+                        var x: i16 = grid_x;
+                        var y: i16 = grid_y;
+                        x += dx;
+                        y += dy;
+                        std.debug.assert(x >= 0 and y >= 0);
+                        if (x >= COLUMN_COUNT or
+                            y >= ROW_COUNT) break :cont;
+
+                        const other = level.grid[@intCast(x)][@intCast(y)];
+                        if (other.kind != .hexagon) break :cont;
+
+                        if (colorsAreSimilar(shape.color, other.color)) {
+                            const other_pos = gridCenter(.{ .x = @intCast(x), .y = @intCast(y) });
+                            const thickness: f32 = 6;
+                            const color1 = shape.color.alpha(0.8);
+                            const color2 = other.color.alpha(0.8);
+                            switch (dy) {
+                                // Left to right
+                                0 => draw.rectangleGradient(.{
+                                    .x = shape_pos.x,
+                                    .y = shape_pos.y - thickness / 2,
+                                    .width = other_pos.x - shape_pos.x,
+                                    .height = thickness,
+                                }, color1, color1, color2, color2),
+                                // Top to bottom
+                                1 => draw.rectangleGradient(.{
+                                    .x = shape_pos.x - thickness / 2,
+                                    .y = shape_pos.y,
+                                    .width = thickness,
+                                    .height = other_pos.y - shape_pos.y,
+                                }, color1, color2, color2, color1),
+                                else => unreachable,
+                            }
+                        }
+                    }
                 }
+            }
+            // Draw shapes
+            inline for (level.grid, 0..) |column, grid_x| {
+                inline for (column, 0..) |shape, grid_y| {
+                    const grid_pos = GridPosition{ .x = grid_x, .y = grid_y };
+                    const center = gridCenter(grid_pos);
+                    const bg_color: Color =
+                        if (selected_square == grid_pos)
+                            Color.white
+                        else switch (shape.effect) {
+                            .none => Color.blank,
+                            .hovered => |hovered| Color.white.alpha(0.7 * hovered.fadeout / HOVER_FADEOUT_SECS),
+                            .wrong => Color.red,
+                        };
+                    draw.rectangle(.{
+                        .x = center.x - SELECT_WIDTH / 2,
+                        .y = center.y - SELECT_HEIGHT / 2,
+                        .width = SELECT_WIDTH,
+                        .height = SELECT_HEIGHT,
+                    }, bg_color);
+                    drawShape(shape, .{ .at = center });
+                }
+            }
+
+            for (level.merging_squares.items) |merging| {
+                drawShape(merging.shape, .{ .at = merging.position });
             }
 
             rl.beginTextureMode(game_texture);
@@ -251,6 +445,48 @@ fn runLevel() bool {
     return false;
 }
 
+const RIGHT_DOWN: [2]struct { i8, i8 } = .{
+    .{ 1, 0 },
+    .{ 0, 1 },
+};
+const UP_DOWN_LEFT_RIGHT: [4]struct { i8, i8 } = .{
+    .{ -1, 0 },
+    .{ 0, -1 },
+} ++ RIGHT_DOWN;
+
+fn gridCenter(grid_pos: GridPosition) Vector2 {
+    return .{
+        .x = MARGIN_H + (SHAPE_WIDTH + PADDING_H) * util.toF32(grid_pos.x),
+        .y = MARGIN_V + (SHAPE_HEIGHT + PADDING_V) * util.toF32(grid_pos.y),
+    };
+}
+
+fn colorsAreSimilar(a: Color, b: Color) bool {
+    return math.hueDistance(a.toHSV().x, b.toHSV().x) < 30;
+}
+
+fn clearAdjacentHexagonsOfSimilarColor(grid_pos: GridPosition, color: Color) void {
+    const shape = level.gridGet(grid_pos);
+    if (!(shape.kind == .hexagon and colorsAreSimilar(shape.color, color))) return;
+
+    shape.* = .{};
+    for (UP_DOWN_LEFT_RIGHT) |dir| {
+        const dx, const dy = dir;
+        var x: i16 = grid_pos.x;
+        var y: i16 = grid_pos.y;
+        x += dx;
+        y += dy;
+        if (x < 0 or
+            x >= COLUMN_COUNT or
+            y < 0 or
+            y >= ROW_COUNT) continue;
+        clearAdjacentHexagonsOfSimilarColor(.{
+            .x = @intCast(x),
+            .y = @intCast(y),
+        }, color);
+    }
+}
+
 pub fn showError(text: [:0]const u8) void {
     const font_size = 15;
     const margin = 4;
@@ -279,7 +515,7 @@ const game = @This();
 pub var level: LevelState = undefined;
 
 pub const LevelState = struct {
-    squares: [COLUMN_COUNT][ROW_COUNT]Shape = @splat(@splat(Shape{})),
+    grid: [COLUMN_COUNT][ROW_COUNT]Shape = @splat(@splat(Shape{})),
     merging_squares: std.ArrayList(Merging) = .empty,
     hexagons: std.ArrayList(Shape) = .empty,
 
@@ -296,10 +532,17 @@ pub const LevelState = struct {
     pub var is_defined: bool = false;
 
     pub const Merging = struct {
-        mover: Shape,
-        dest_x: u8,
-        dest_y: u8,
+        shape: Shape,
+        position: Vector2 = .{ .x = 0, .y = 0 },
+        start: Vector2,
+        end: Vector2,
+        start_t: u32,
+        dest_grid_pos: GridPosition,
     };
+
+    pub fn gridGet(self: *LevelState, pos: GridPosition) *Shape {
+        return &self.grid[pos.x][pos.y];
+    }
 
     pub const PlaySfxOptions = struct {
         /// Used for panning.
@@ -366,17 +609,38 @@ pub const LevelState = struct {
 };
 
 pub const Shape = struct {
-    kind: enum {
+    kind: Kind = .empty,
+    color: Color = .black,
+    scale: f32 = 1,
+    clickable: bool = false,
+    effect: union(enum) {
+        none,
+        hovered: struct { fadeout: f32 },
+        /// Fadeout time is handled globally.
+        wrong,
+    } = .none,
+
+    pub fn markWrong(self: *Shape) void {
+        self.clickable = false;
+        self.effect = .wrong;
+    }
+    pub fn unmarkWrong(self: *Shape) void {
+        self.clickable = true;
+        self.effect = .none;
+    }
+
+    pub const Kind = enum {
         empty,
         square,
         diamond,
         hexagon,
-    } = .empty,
-    color: Color = .black,
-    x_px: f32 = 0,
-    y_px: f32 = 0,
-    scale: f32 = 1,
-    clickable: bool = false,
+    };
+};
+
+pub const GridPosition = packed struct {
+    x: Int = 0,
+    y: Int = 0,
+    pub const Int = u8;
 };
 
 //
@@ -386,24 +650,60 @@ pub const Shape = struct {
 fn drawShape(
     shape: Shape,
     position: union(enum) {
-        at_its_own_position,
-        at: struct { f32, f32 },
+        at: Vector2,
     },
 ) void {
-    const x: f32, const y: f32 = switch (position) {
-        .at_its_own_position => .{ shape.x_px, shape.y_px },
+    const x, const y = math.vecXY(switch (position) {
         .at => |pos| pos,
-    };
+    });
+    const left = x - SHAPE_WIDTH / 2;
+    const top = y - SHAPE_HEIGHT / 2;
     switch (shape.kind) {
         .empty => {},
         .square => {
             draw.rectangle(.{
-                .x = @trunc(x - SHAPE_WIDTH / 2),
-                .y = @trunc(y - SHAPE_HEIGHT / 2),
+                .x = left,
+                .y = top,
                 .width = SHAPE_WIDTH,
                 .height = SHAPE_HEIGHT,
             }, shape.color);
         },
-        .diamond, .hexagon => @panic("not implemented yet"),
+        .diamond => {
+            draw.triangle(
+                .init(x, top),
+                .init(left, y),
+                .init(x, top + SHAPE_HEIGHT),
+                shape.color,
+            );
+            draw.triangle(
+                .init(x, top),
+                .init(x, top + SHAPE_HEIGHT),
+                .init(left + SHAPE_WIDTH, y),
+                shape.color,
+            );
+        },
+        .hexagon => {
+            const SHAPE_THIRD = @as(comptime_float, SHAPE_WIDTH) / 3.0;
+            const left_third = left + SHAPE_THIRD;
+            const right_third = left_third + SHAPE_THIRD;
+            draw.triangle(
+                .init(left_third, top),
+                .init(left, y),
+                .init(left_third, top + SHAPE_HEIGHT),
+                shape.color,
+            );
+            draw.rectangle(.{
+                .x = left_third,
+                .y = top,
+                .width = SHAPE_THIRD,
+                .height = SHAPE_HEIGHT,
+            }, shape.color);
+            draw.triangle(
+                .init(right_third, top),
+                .init(right_third, top + SHAPE_HEIGHT),
+                .init(left + SHAPE_WIDTH, y),
+                shape.color,
+            );
+        },
     }
 }
