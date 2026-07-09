@@ -58,13 +58,13 @@ const MARGIN_H = (game_width - GRID_WIDTH) / 2;
 pub fn run() void {
     while (true) {
         var merging_squares_buffer: [10]LevelState.Merging = undefined;
-        var hexagons_buffer: [10]Shape = undefined;
+        var scoring_hexagons_buffer: [COLUMN_COUNT * ROW_COUNT]LevelState.Scoring = undefined;
         var vfx_buffer: [10]Entity = undefined;
         var sfx_buffer: [10]rl.Sound = undefined;
         LevelState.is_defined = true;
         level = .{
             .merging_squares = .initBuffer(&merging_squares_buffer),
-            .hexagons = .initBuffer(&hexagons_buffer),
+            .scoring_hexagons = .initBuffer(&scoring_hexagons_buffer),
             .vfx = .initBuffer(&vfx_buffer),
             .sfx = .initBuffer(&sfx_buffer),
         };
@@ -88,10 +88,15 @@ fn runLevel() bool {
     var selected_square: ?GridPosition = null;
     var wrong_choice_timer: f32 = 0;
 
+    var score: u64 = 0;
+    var chain_clear_time_bonus: u64 = 20;
+    var time_left: f32 = 30.0;
+
     for (&level.grid) |*column| {
         for (column) |*square| {
             square.* = Shape{
-                .kind = if (core.rng.boolean()) .square else .diamond,
+                // .kind = if (core.rng.boolean()) .square else .diamond,
+                .kind = .hexagon,
                 .color = Color.fromHSV(core.rng.float(f32) * 360.0, 1.0, 1.0),
                 .clickable = true,
             };
@@ -116,6 +121,8 @@ fn runLevel() bool {
             .exit_level => return false,
         };
 
+        const SCORE_MAX_DIGITS = std.fmt.comptimePrint("{}", .{std.math.maxInt(@TypeOf(score))}).len;
+
         const HOVER_FADEOUT_SECS: comptime_float = 0.1;
         var hovered_square: ?GridPosition = null;
 
@@ -125,6 +132,8 @@ fn runLevel() bool {
             if (inputs.buttonPressed(.pause, .{})) {
                 core.pause();
             }
+
+            time_left -= FRAME_DELTA;
 
             update_shapes: {
                 wrong_choice_timer -= FRAME_DELTA;
@@ -189,7 +198,9 @@ fn runLevel() bool {
                             selected_square = clicked_pos;
                         },
                         .hexagon => {
-                            clearAdjacentHexagonsOfSimilarColor(clicked_pos, clicked.color);
+                            clearHexagonColorChain(clicked_pos, 1);
+                            time_left += @floatFromInt(chain_clear_time_bonus);
+                            chain_clear_time_bonus = @max(chain_clear_time_bonus / 2, 1);
                         },
                     }
                     break :update_shapes;
@@ -245,6 +256,27 @@ fn runLevel() bool {
                     }
                 }
             }
+            {
+                var i: usize = level.scoring_hexagons.items.len;
+                while (i > 0) {
+                    i -= 1;
+                    var scoring = &level.scoring_hexagons.items[i];
+                    const pos = &scoring.position;
+                    const anim_position =
+                        if (core.t < scoring.start_t)
+                            0.0
+                        else
+                            util.toF32(core.t - scoring.start_t) / FRAMES_PER_SEC;
+                    const anim_duration = 0.5;
+                    pos.* = Vector2.lerp(scoring.start, scoring.end, @min(anim_position / anim_duration, 1));
+
+                    if (anim_position >= anim_duration) {
+                        score += scoring.award;
+                        _ = level.scoring_hexagons.swapRemove(i);
+                        scoring = undefined; // there's now a different one (or nothing) in that slot.
+                    }
+                }
+            }
 
             // Update HUD
             {}
@@ -288,10 +320,10 @@ fn runLevel() bool {
 
             // Draw lines between similar hexagons
             inline for (0..level.grid.len) |grid_x| {
-                inline for (0..level.grid[0].len) |grid_y| cont: { // can't use "continue" because of "inline"
+                inline for (0..level.grid[0].len) |grid_y| next_shape: { // can't use "continue" because of "inline"
                     const shape = level.grid[grid_x][grid_y];
                     const shape_pos = gridCenter(.{ .x = grid_x, .y = grid_y });
-                    if (shape.kind != .hexagon) break :cont;
+                    if (shape.kind != .hexagon) break :next_shape;
 
                     for (RIGHT_DOWN) |dir| {
                         const dx, const dy = dir;
@@ -299,14 +331,13 @@ fn runLevel() bool {
                         var y: i16 = grid_y;
                         x += dx;
                         y += dy;
-                        std.debug.assert(x >= 0 and y >= 0);
-                        if (x >= COLUMN_COUNT or
-                            y >= ROW_COUNT) break :cont;
+                        if (x == COLUMN_COUNT or y == ROW_COUNT) continue;
+                        std.debug.assert((x >= 1 and y >= 1) or ((x == 0) != (y == 0)));
+                        std.debug.assert(x < COLUMN_COUNT);
+                        std.debug.assert(y < ROW_COUNT);
 
                         const other = level.grid[@intCast(x)][@intCast(y)];
-                        if (other.kind != .hexagon) break :cont;
-
-                        if (colorsAreSimilar(shape.color, other.color)) {
+                        if (adjacentShapesCanChain(shape, other)) {
                             const other_pos = gridCenter(.{ .x = @intCast(x), .y = @intCast(y) });
                             const thickness: f32 = 6;
                             const color1 = shape.color;
@@ -352,18 +383,64 @@ fn runLevel() bool {
                         .width = SELECT_WIDTH,
                         .height = SELECT_HEIGHT,
                     }, bg_color);
-                    drawShape(shape, center);
+                    drawShape(shape, center, .{});
                 }
             }
 
             for (level.merging_squares.items) |merging| {
-                drawShape(merging.shape, merging.position);
+                drawShape(merging.shape, merging.position, .{});
+            }
+            for (level.scoring_hexagons.items) |scoring| {
+                const pos = scoring.position;
+                drawShape(scoring.shape, pos, .{ .scale = 2 });
+                var buffer: [SCORE_MAX_DIGITS + 1]u8 = undefined;
+                const text = std.fmt.bufPrintZ(&buffer, "{}", .{scoring.award}) catch unreachable;
+                const text_size = core.windowing.textSize(text, HUD_FONT_SIZE);
+                _ = draw.textHighRes(
+                    text,
+                    pos.x - text_size.x / 2,
+                    pos.y - text_size.y / 2,
+                    assets.font,
+                    HUD_FONT_SIZE,
+                    SHAPE_OUTLINE_COLOR,
+                    null,
+                );
             }
 
             rl.beginTextureMode(game_texture);
 
             // Draw HUD
-            if (!core.isPaused()) {
+            {
+                {
+                    var buffer: ["Score: ".len + SCORE_MAX_DIGITS + 1]u8 = undefined;
+                    const text = std.fmt.bufPrintZ(&buffer, "Score: {}", .{score}) catch unreachable;
+                    _ = draw.textHighRes(
+                        text,
+                        SCORE_TEXT_POSITION.x,
+                        SCORE_TEXT_POSITION.y,
+                        assets.font,
+                        HUD_FONT_SIZE,
+                        HUD_FONT_COLOR,
+                        HUD_TEXT_EFFECT,
+                    );
+                }
+                {
+                    const max_time_digits = 10;
+                    var buffer: ["Time: ".len + max_time_digits + ".0".len + 1]u8 = undefined;
+                    const text = std.fmt.bufPrintZ(&buffer, "Time: {d:.1}", .{time_left}) catch unreachable;
+                    _ = draw.textHighRes(
+                        text,
+                        MARGIN_H / 2,
+                        game_height - MARGIN_V + (MARGIN_V - HUD_FONT_SIZE) / 2,
+                        assets.font,
+                        HUD_FONT_SIZE,
+                        HUD_FONT_COLOR,
+                        HUD_TEXT_EFFECT,
+                    );
+                }
+                score = score;
+                time_left = time_left;
+
                 if (debug.show_fps) {
                     rl.endTextureMode();
                     rl.beginTextureMode(text_texture);
@@ -381,7 +458,7 @@ fn runLevel() bool {
                         4,
                         4,
                         assets.font,
-                        7.5,
+                        HUD_FONT_SIZE,
                         if (flash) pico8_colors.pink else pico8_colors.white,
                         .{ .kind = .{ .outline = if (flash) pico8_colors.red else pico8_colors.dark_blue } },
                     );
@@ -446,6 +523,17 @@ fn runLevel() bool {
     return false;
 }
 
+const HUD_FONT_SIZE = assets.en_font_size;
+const HUD_FONT_COLOR = Color.white;
+const HUD_TEXT_EFFECT: ?draw.TextEffect = .{
+    .kind = .{ .outline = SHAPE_OUTLINE_COLOR },
+    .scale = SHAPE_OUTLINE_THICKNESS,
+};
+const SCORE_TEXT_POSITION = Vector2{
+    .x = MARGIN_H / 2,
+    .y = (MARGIN_V - HUD_FONT_SIZE) / 2,
+};
+
 const RIGHT_DOWN: [2]struct { i8, i8 } = .{
     .{ 1, 0 },
     .{ 0, 1 },
@@ -462,15 +550,27 @@ fn gridCenter(grid_pos: GridPosition) Vector2 {
     };
 }
 
-fn colorsAreSimilar(a: Color, b: Color) bool {
-    return math.hueDistance(a.toHSV().x, b.toHSV().x) < 30;
+/// Assumes that the shapes are adjacent.
+fn adjacentShapesCanChain(a: Shape, b: Shape) bool {
+    return a.kind == .hexagon and b.kind == .hexagon and
+        math.hueDistance(a.color.toHSV().x, b.color.toHSV().x) < 30;
 }
 
-fn clearAdjacentHexagonsOfSimilarColor(grid_pos: GridPosition, color: Color) void {
-    const shape = level.gridGet(grid_pos);
-    if (!(shape.kind == .hexagon and colorsAreSimilar(shape.color, color))) return;
+fn clearHexagonColorChain(grid_pos: GridPosition, award: u64) void {
+    const shape_ptr = level.gridGet(grid_pos);
+    const shape = shape_ptr.*;
+    shape_ptr.* = .{};
 
-    shape.* = .{};
+    std.debug.assert(shape.kind == .hexagon);
+    const delay_secs = 0.1 * @as(f32, @floatFromInt(award - 1));
+    level.scoring_hexagons.appendBounded(.{
+        .award = award,
+        .shape = shape,
+        .start = gridCenter(grid_pos),
+        .end = SCORE_TEXT_POSITION,
+        .start_t = core.t + @as(u32, @trunc(delay_secs * FRAMES_PER_SEC)),
+    }) catch @panic("too many scoring hexagons");
+
     for (UP_DOWN_LEFT_RIGHT) |dir| {
         const dx, const dy = dir;
         var x: i16 = grid_pos.x;
@@ -481,10 +581,12 @@ fn clearAdjacentHexagonsOfSimilarColor(grid_pos: GridPosition, color: Color) voi
             x >= COLUMN_COUNT or
             y < 0 or
             y >= ROW_COUNT) continue;
-        clearAdjacentHexagonsOfSimilarColor(.{
-            .x = @intCast(x),
-            .y = @intCast(y),
-        }, color);
+
+        const next_pos = GridPosition{ .x = @intCast(x), .y = @intCast(y) };
+        const next = level.gridGet(next_pos).*;
+        if (!adjacentShapesCanChain(shape, next)) continue;
+
+        clearHexagonColorChain(next_pos, award + 1);
     }
 }
 
@@ -518,7 +620,7 @@ pub var level: LevelState = undefined;
 pub const LevelState = struct {
     grid: [COLUMN_COUNT][ROW_COUNT]Shape = @splat(@splat(Shape{})),
     merging_squares: std.ArrayList(Merging) = .empty,
-    hexagons: std.ArrayList(Shape) = .empty,
+    scoring_hexagons: std.ArrayList(Scoring) = .empty,
 
     /// Custom animations. Automatically removed when the anim is done, but otherwise
     /// controlled by whatever code added them.
@@ -539,6 +641,14 @@ pub const LevelState = struct {
         end: Vector2,
         start_t: u32,
         dest_grid_pos: GridPosition,
+    };
+    pub const Scoring = struct {
+        award: u64,
+        shape: Shape,
+        position: Vector2 = .{ .x = 0, .y = 0 },
+        start: Vector2,
+        end: Vector2,
+        start_t: u32,
     };
 
     pub fn gridGet(self: *LevelState, pos: GridPosition) *Shape {
@@ -612,7 +722,6 @@ pub const LevelState = struct {
 pub const Shape = struct {
     kind: Kind = .empty,
     color: Color = .black,
-    scale: f32 = 1,
     clickable: bool = false,
     effect: union(enum) {
         none,
@@ -648,27 +757,33 @@ pub const GridPosition = packed struct {
 // Drawing
 //
 
-const SHAPE_OUTLINE_THICK = 4;
+const SHAPE_OUTLINE_THICKNESS = 4;
 const SHAPE_OUTLINE_COLOR = Color.black;
 
-fn drawShape(shape: Shape, at: Vector2) void {
-    const left = at.x - SHAPE_WIDTH / 2;
-    const top = at.y - SHAPE_HEIGHT / 2;
+fn drawShape(shape: Shape, at: Vector2, options: struct {
+    scale: f32 = 1,
+}) void {
+    const width = SHAPE_WIDTH * options.scale;
+    const height = SHAPE_HEIGHT * options.scale;
+    const radius = (SHAPE_WIDTH / 2) * options.scale;
+    std.debug.assert(SHAPE_WIDTH == SHAPE_HEIGHT);
+    const left = at.x - radius;
+    const top = at.y - radius;
     switch (shape.kind) {
         .empty => {},
         .square => {
-            const rect = Rectangle.init(left, top, SHAPE_WIDTH, SHAPE_HEIGHT);
+            const rect = Rectangle.init(left, top, width, height);
             draw.rectangle(rect, shape.color);
-            draw.rectangleLines(rect, SHAPE_OUTLINE_THICK, SHAPE_OUTLINE_COLOR);
+            draw.rectangleLines(rect, SHAPE_OUTLINE_THICKNESS, SHAPE_OUTLINE_COLOR);
         },
         .diamond => {
-            draw.polygon(at, 4, SHAPE_WIDTH / 2, 0, shape.color);
-            draw.polygonLines(at, 4, SHAPE_WIDTH / 2, 0, SHAPE_OUTLINE_THICK, SHAPE_OUTLINE_COLOR);
+            draw.polygon(at, 4, radius, 0, shape.color);
+            draw.polygonLines(at, 4, radius, 0, SHAPE_OUTLINE_THICKNESS, SHAPE_OUTLINE_COLOR);
         },
         .hexagon => {
             const rotation = util.decPartF(util.toF32(core.t) / FRAMES_PER_SEC) * 60;
-            draw.polygon(at, 6, SHAPE_WIDTH / 2, rotation, shape.color);
-            draw.polygonLines(at, 6, SHAPE_WIDTH / 2, rotation, SHAPE_OUTLINE_THICK, SHAPE_OUTLINE_COLOR);
+            draw.polygon(at, 6, radius, rotation, shape.color);
+            draw.polygonLines(at, 6, radius, rotation, SHAPE_OUTLINE_THICKNESS, SHAPE_OUTLINE_COLOR);
         },
     }
 }

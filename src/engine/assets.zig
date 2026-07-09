@@ -15,7 +15,7 @@ pub var sounds: AssetMap(rl.Sound, null) = undefined;
 pub const fonts_by_lang = i18n.Multilingual(*const rl.Font).init(.{
     .en = &font,
 });
-pub const en_font_size = 4;
+pub const en_font_size = 32;
 pub const font_size_by_lang = i18n.Multilingual(f32).init(.{
     .en = en_font_size,
 });
