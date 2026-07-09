@@ -33,11 +33,11 @@ const floorVec = math.floorVec;
 const levels_raw = @import("levels.zig");
 const Entity = @import("engine/Entity.zig");
 
-const COLUMN_COUNT = 10;
-const ROW_COUNT = 10;
-const PADDING_H = 10;
+const COLUMN_COUNT = 12;
+const ROW_COUNT = 12;
+const PADDING_H = 15;
 const PADDING_V = PADDING_H;
-const SHAPE_WIDTH = 20;
+const SHAPE_WIDTH = 35;
 const SHAPE_HEIGHT = SHAPE_WIDTH;
 const SELECT_WIDTH = SHAPE_WIDTH + PADDING_H;
 const SELECT_HEIGHT = SHAPE_HEIGHT + PADDING_V;
@@ -309,8 +309,8 @@ fn runLevel() bool {
                         if (colorsAreSimilar(shape.color, other.color)) {
                             const other_pos = gridCenter(.{ .x = @intCast(x), .y = @intCast(y) });
                             const thickness: f32 = 6;
-                            const color1 = shape.color.alpha(0.8);
-                            const color2 = other.color.alpha(0.8);
+                            const color1 = shape.color;
+                            const color2 = other.color;
                             switch (dy) {
                                 // Left to right
                                 0 => draw.rectangleGradient(.{
@@ -333,6 +333,7 @@ fn runLevel() bool {
                 }
             }
             // Draw shapes
+            @setEvalBranchQuota(COLUMN_COUNT * ROW_COUNT * 4);
             inline for (level.grid, 0..) |column, grid_x| {
                 inline for (column, 0..) |shape, grid_y| {
                     const grid_pos = GridPosition{ .x = grid_x, .y = grid_y };
@@ -351,12 +352,12 @@ fn runLevel() bool {
                         .width = SELECT_WIDTH,
                         .height = SELECT_HEIGHT,
                     }, bg_color);
-                    drawShape(shape, .{ .at = center });
+                    drawShape(shape, center);
                 }
             }
 
             for (level.merging_squares.items) |merging| {
-                drawShape(merging.shape, .{ .at = merging.position });
+                drawShape(merging.shape, merging.position);
             }
 
             rl.beginTextureMode(game_texture);
@@ -456,8 +457,8 @@ const UP_DOWN_LEFT_RIGHT: [4]struct { i8, i8 } = .{
 
 fn gridCenter(grid_pos: GridPosition) Vector2 {
     return .{
-        .x = MARGIN_H + (SHAPE_WIDTH + PADDING_H) * util.toF32(grid_pos.x),
-        .y = MARGIN_V + (SHAPE_HEIGHT + PADDING_V) * util.toF32(grid_pos.y),
+        .x = MARGIN_H + (SHAPE_WIDTH + PADDING_H) * util.toF32(grid_pos.x) + SHAPE_WIDTH / 2,
+        .y = MARGIN_V + (SHAPE_HEIGHT + PADDING_V) * util.toF32(grid_pos.y) + SHAPE_HEIGHT / 2,
     };
 }
 
@@ -647,63 +648,27 @@ pub const GridPosition = packed struct {
 // Drawing
 //
 
-fn drawShape(
-    shape: Shape,
-    position: union(enum) {
-        at: Vector2,
-    },
-) void {
-    const x, const y = math.vecXY(switch (position) {
-        .at => |pos| pos,
-    });
-    const left = x - SHAPE_WIDTH / 2;
-    const top = y - SHAPE_HEIGHT / 2;
+const SHAPE_OUTLINE_THICK = 4;
+const SHAPE_OUTLINE_COLOR = Color.black;
+
+fn drawShape(shape: Shape, at: Vector2) void {
+    const left = at.x - SHAPE_WIDTH / 2;
+    const top = at.y - SHAPE_HEIGHT / 2;
     switch (shape.kind) {
         .empty => {},
         .square => {
-            draw.rectangle(.{
-                .x = left,
-                .y = top,
-                .width = SHAPE_WIDTH,
-                .height = SHAPE_HEIGHT,
-            }, shape.color);
+            const rect = Rectangle.init(left, top, SHAPE_WIDTH, SHAPE_HEIGHT);
+            draw.rectangle(rect, shape.color);
+            draw.rectangleLines(rect, SHAPE_OUTLINE_THICK, SHAPE_OUTLINE_COLOR);
         },
         .diamond => {
-            draw.triangle(
-                .init(x, top),
-                .init(left, y),
-                .init(x, top + SHAPE_HEIGHT),
-                shape.color,
-            );
-            draw.triangle(
-                .init(x, top),
-                .init(x, top + SHAPE_HEIGHT),
-                .init(left + SHAPE_WIDTH, y),
-                shape.color,
-            );
+            draw.polygon(at, 4, SHAPE_WIDTH / 2, 0, shape.color);
+            draw.polygonLines(at, 4, SHAPE_WIDTH / 2, 0, SHAPE_OUTLINE_THICK, SHAPE_OUTLINE_COLOR);
         },
         .hexagon => {
-            const SHAPE_THIRD = @as(comptime_float, SHAPE_WIDTH) / 3.0;
-            const left_third = left + SHAPE_THIRD;
-            const right_third = left_third + SHAPE_THIRD;
-            draw.triangle(
-                .init(left_third, top),
-                .init(left, y),
-                .init(left_third, top + SHAPE_HEIGHT),
-                shape.color,
-            );
-            draw.rectangle(.{
-                .x = left_third,
-                .y = top,
-                .width = SHAPE_THIRD,
-                .height = SHAPE_HEIGHT,
-            }, shape.color);
-            draw.triangle(
-                .init(right_third, top),
-                .init(right_third, top + SHAPE_HEIGHT),
-                .init(left + SHAPE_WIDTH, y),
-                shape.color,
-            );
+            const rotation = util.decPartF(util.toF32(core.t) / FRAMES_PER_SEC) * 60;
+            draw.polygon(at, 6, SHAPE_WIDTH / 2, rotation, shape.color);
+            draw.polygonLines(at, 6, SHAPE_WIDTH / 2, rotation, SHAPE_OUTLINE_THICK, SHAPE_OUTLINE_COLOR);
         },
     }
 }

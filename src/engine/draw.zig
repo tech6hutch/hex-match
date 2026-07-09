@@ -13,7 +13,7 @@ const Vector2 = math.Vector2;
 
 /// Resolution to draw text at. 2 for double (16x16 pixels in 8x8 game pixels).
 /// Obviously, the game pixels can't be drawn at a scale lower than this.
-pub const high_res_text_scale = 2;
+pub const high_res_text_scale = 1;
 
 /// Imported from Raylib.
 pub const Color = rl.Color;
@@ -131,15 +131,22 @@ pub fn triangle(v1: Vector2, v2: Vector2, v3: Vector2, color: Color) void {
 pub fn rectangle(rect: Rectangle, color: Color) void {
     rl.drawRectangleRec(rect, color);
 }
-
 /// Draw rectangle outline.
 pub fn rectangleLines(rect: Rectangle, lineThick: f32, color: Color) void {
     rl.drawRectangleLinesEx(rect, lineThick, color);
 }
-
 /// Draw a rectangle filled with a gradient.
 pub fn rectangleGradient(rect: Rectangle, topLeft: Color, bottomLeft: Color, bottomRight: Color, topRight: Color) void {
     rl.drawRectangleGradientEx(rect, topLeft, bottomLeft, bottomRight, topRight);
+}
+
+/// Draw a regular polygon.
+pub fn polygon(center: Vector2, sides: i32, radius: f32, rotation: f32, color: Color) void {
+    rl.drawPoly(center, sides, radius, rotation, color);
+}
+/// Draw a polygon outline.
+pub fn polygonLines(center: Vector2, sides: i32, radius: f32, rotation: f32, lineThick: f32, color: Color) void {
+    rl.drawPolyLinesEx(center, sides, radius, rotation, lineThick, color);
 }
 
 //
