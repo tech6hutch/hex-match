@@ -94,12 +94,7 @@ fn runLevel() bool {
 
     for (&level.grid) |*column| {
         for (column) |*square| {
-            square.* = Shape{
-                // .kind = if (core.rng.boolean()) .square else .diamond,
-                .kind = .hexagon,
-                .color = Color.fromHSV(core.rng.float(f32) * 360.0, 1.0, 1.0),
-                .clickable = true,
-            };
+            square.* = .random();
         }
     }
 
@@ -154,12 +149,19 @@ fn runLevel() bool {
                     std.debug.assert(count > 0);
                 }
 
+                const SPAWN_DELAY_FRAMES: comptime_int = 1 * FRAMES_PER_SEC;
+
                 const mouse_pos = rl.getMousePosition();
                 var maybe_clicked_pos: ?GridPosition = null;
                 inline for (&level.grid, 0..) |*column, grid_x| {
                     inline for (column, 0..) |*shape, grid_y| cont: {
                         const grid_pos = GridPosition{ .x = grid_x, .y = grid_y };
                         const center = gridCenter(grid_pos);
+
+                        if (shape.kind == .empty and core.t - shape.creation_t >= SPAWN_DELAY_FRAMES) {
+                            shape.* = .random();
+                        }
+
                         const a_wrong_choice_was_made = wrong_choice_timer > 0;
                         if (!a_wrong_choice_was_made) std.debug.assert(shape.effect != .wrong);
                         if (a_wrong_choice_was_made or !shape.clickable) {
@@ -229,7 +231,7 @@ fn runLevel() bool {
                     .start_t = core.t,
                     .dest_grid_pos = other_pos,
                 }) catch @panic("too many merging shapes");
-                clicked.* = .{};
+                clicked.* = .{ .creation_t = core.t };
             }
 
             // Update moving shapes
@@ -383,7 +385,10 @@ fn runLevel() bool {
                         .width = SELECT_WIDTH,
                         .height = SELECT_HEIGHT,
                     }, bg_color);
-                    drawShape(shape, center, .{});
+                    const SPAWN_ANIM_FRAMES = 1 * FRAMES_PER_SEC;
+                    drawShape(shape, center, .{
+                        .scale = @min(util.toF32(core.t - shape.creation_t) / SPAWN_ANIM_FRAMES, 1.0),
+                    });
                 }
             }
 
@@ -426,8 +431,8 @@ fn runLevel() bool {
                 }
                 {
                     const max_time_digits = 10;
-                    var buffer: ["Time: ".len + max_time_digits + ".0".len + 1]u8 = undefined;
-                    const text = std.fmt.bufPrintZ(&buffer, "Time: {d:.1}", .{time_left}) catch unreachable;
+                    var buffer: ["Time: ".len + max_time_digits + 1]u8 = undefined;
+                    const text = std.fmt.bufPrintZ(&buffer, "Time: {d:.0}", .{time_left}) catch unreachable;
                     _ = draw.textHighRes(
                         text,
                         MARGIN_H / 2,
@@ -559,7 +564,7 @@ fn adjacentShapesCanChain(a: Shape, b: Shape) bool {
 fn clearHexagonColorChain(grid_pos: GridPosition, award: u64) void {
     const shape_ptr = level.gridGet(grid_pos);
     const shape = shape_ptr.*;
-    shape_ptr.* = .{};
+    shape_ptr.* = .{ .creation_t = core.t };
 
     std.debug.assert(shape.kind == .hexagon);
     const delay_secs = 0.1 * @as(f32, @floatFromInt(award - 1));
@@ -618,7 +623,7 @@ const game = @This();
 pub var level: LevelState = undefined;
 
 pub const LevelState = struct {
-    grid: [COLUMN_COUNT][ROW_COUNT]Shape = @splat(@splat(Shape{})),
+    grid: [COLUMN_COUNT][ROW_COUNT]Shape = @splat(@splat(Shape{ .creation_t = 0 })),
     merging_squares: std.ArrayList(Merging) = .empty,
     scoring_hexagons: std.ArrayList(Scoring) = .empty,
 
@@ -720,6 +725,7 @@ pub const LevelState = struct {
 };
 
 pub const Shape = struct {
+    creation_t: u32,
     kind: Kind = .empty,
     color: Color = .black,
     clickable: bool = false,
@@ -729,6 +735,15 @@ pub const Shape = struct {
         /// Fadeout time is handled globally.
         wrong,
     } = .none,
+
+    pub fn random() Shape {
+        return .{
+            .creation_t = core.t,
+            .kind = if (core.rng.boolean()) .square else .diamond,
+            .color = Color.fromHSV(core.rng.float(f32) * 360.0, 1.0, 1.0),
+            .clickable = true,
+        };
+    }
 
     pub fn markWrong(self: *Shape) void {
         self.clickable = false;
