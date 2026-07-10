@@ -90,6 +90,7 @@ fn runLevel() bool {
 
     var score: u64 = 0;
     var chain_clear_time_bonus: u64 = 20;
+    var time_bonus_flicker_left: f32 = 0;
     var time_left: f32 = 30.0;
 
     for (&level.grid) |*column| {
@@ -203,6 +204,7 @@ fn runLevel() bool {
                             clearHexagonColorChain(clicked_pos, 1);
                             time_left += @floatFromInt(chain_clear_time_bonus);
                             chain_clear_time_bonus = @max(chain_clear_time_bonus / 2, 1);
+                            time_bonus_flicker_left = 0.5;
                         },
                     }
                     break :update_shapes;
@@ -430,21 +432,42 @@ fn runLevel() bool {
                     );
                 }
                 {
+                    const top = game_height - MARGIN_V + (MARGIN_V - HUD_FONT_SIZE) / 2;
+                    var x: f32 = MARGIN_H / 2;
+
                     const max_time_digits = 10;
-                    var buffer: ["Time: ".len + max_time_digits + 1]u8 = undefined;
-                    const text = std.fmt.bufPrintZ(&buffer, "Time: {d:.0}", .{time_left}) catch unreachable;
-                    _ = draw.textHighRes(
-                        text,
-                        MARGIN_H / 2,
-                        game_height - MARGIN_V + (MARGIN_V - HUD_FONT_SIZE) / 2,
+                    var time_buffer: ["Time: ".len + max_time_digits + " ".len + 1]u8 = undefined;
+                    const time_text = std.fmt.bufPrintZ(&time_buffer, "Time: {d:.0} ", .{time_left}) catch unreachable;
+                    x += draw.textHighRes(
+                        time_text,
+                        x,
+                        top,
                         assets.font,
                         HUD_FONT_SIZE,
                         HUD_FONT_COLOR,
                         HUD_TEXT_EFFECT,
                     );
+
+                    time_bonus_flicker_left = @max(time_bonus_flicker_left - FRAME_DELTA, 0);
+                    // When flickering, alternate on/off every 0.1 seconds.
+                    if (time_bonus_flicker_left == 0 or @as(u32, @trunc(time_bonus_flicker_left * 10)) % 2 == 0) {
+                        var bonus_buffer: ["Clear bonus: 20".len + 1]u8 = undefined;
+                        const bonus_text = std.fmt.bufPrintZ(&bonus_buffer, "Clear bonus: {}", .{chain_clear_time_bonus}) catch unreachable;
+                        _ = draw.textHighRes(
+                            bonus_text,
+                            x,
+                            top + 9,
+                            assets.font,
+                            HUD_FONT_SIZE / 2,
+                            HUD_FONT_COLOR,
+                            blk: {
+                                var text_effect = HUD_TEXT_EFFECT;
+                                text_effect.scale /= 2;
+                                break :blk text_effect;
+                            },
+                        );
+                    }
                 }
-                score = score;
-                time_left = time_left;
 
                 if (debug.show_fps) {
                     rl.endTextureMode();
@@ -530,7 +553,7 @@ fn runLevel() bool {
 
 const HUD_FONT_SIZE = assets.en_font_size;
 const HUD_FONT_COLOR = Color.white;
-const HUD_TEXT_EFFECT: ?draw.TextEffect = .{
+const HUD_TEXT_EFFECT: draw.TextEffect = .{
     .kind = .{ .outline = SHAPE_OUTLINE_COLOR },
     .scale = SHAPE_OUTLINE_THICKNESS,
 };
