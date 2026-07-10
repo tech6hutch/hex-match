@@ -88,7 +88,7 @@ fn runLevel() bool {
     var score: u64 = 0;
     var chain_clear_time_bonus: u64 = 20;
     var time_bonus_flicker_left: f32 = 0;
-    var time_left: f32 = 5.0;
+    var time_left: f32 = 30.0;
 
     var bg_hue = Color.red.toHSV().x;
 
