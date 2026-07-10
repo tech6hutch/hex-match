@@ -83,15 +83,17 @@ pub fn run() void {
 }
 
 fn runLevel() bool {
-    var bg_hue = Color.red.toHSV().x;
-
-    var selected_square: ?GridPosition = null;
-    var wrong_choice_timer: f32 = 0;
+    var game_over_t: ?u32 = null;
 
     var score: u64 = 0;
     var chain_clear_time_bonus: u64 = 20;
     var time_bonus_flicker_left: f32 = 0;
-    var time_left: f32 = 30.0;
+    var time_left: f32 = 5.0;
+
+    var bg_hue = Color.red.toHSV().x;
+
+    var selected_square: ?GridPosition = null;
+    var wrong_choice_timer: f32 = 0;
 
     for (&level.grid) |*column| {
         for (column) |*square| {
@@ -111,27 +113,42 @@ fn runLevel() bool {
         windowing.handleWindowControls();
         inputs.updateButtonsHeld();
         inputs.updateGamepadConnections();
-        const do_update = switch (core.menus.update()) {
-            .no_change => !core.isPaused(),
-            .closed => false,
-            .exit_level => return false,
-        };
 
         const SCORE_MAX_DIGITS = std.fmt.comptimePrint("{}", .{std.math.maxInt(@TypeOf(score))}).len;
 
         const HOVER_FADEOUT_SECS: comptime_float = 0.1;
-        var hovered_square: ?GridPosition = null;
+
+        const RESTART_BUTTON_RECT = blk: {
+            const height = 40;
+            break :blk Rectangle{
+                .x = MARGIN_H * 2,
+                .width = game_width - (MARGIN_H * 2) * 2,
+                .y = game_height / 2 - height / 2,
+                .height = height,
+            };
+        };
+        const show_restart_button = game_over_t != null and level.scoring_hexagons.items.len == 0;
+        var restart_button_is_hovered = false;
 
         // Update
-        if (do_update) {
-            std.debug.assert(!core.isPaused());
-            if (inputs.buttonPressed(.pause, .{})) {
-                core.pause();
+        {
+            time_left -= FRAME_DELTA;
+            if (time_left <= 0) {
+                time_left = 0;
+                if (game_over_t == null) game_over_t = core.t;
             }
 
-            time_left -= FRAME_DELTA;
+            if (show_restart_button) {
+                const mouse_pos = rl.getMousePosition();
+                if (rl.checkCollisionPointRec(mouse_pos, RESTART_BUTTON_RECT)) {
+                    restart_button_is_hovered = true;
+                    if (rl.isMouseButtonPressed(.left)) {
+                        return true;
+                    }
+                }
+            }
 
-            update_shapes: {
+            if (game_over_t == null) update_shapes: {
                 wrong_choice_timer -= FRAME_DELTA;
                 if (wrong_choice_timer <= 0) {
                     wrong_choice_timer = 0;
@@ -182,7 +199,6 @@ fn runLevel() bool {
                             @abs(center.y - mouse_pos.y) < SELECT_HEIGHT / 2))
                             break :cont; // not hovered
                         if (!rl.isMouseButtonPressed(.left)) {
-                            hovered_square = grid_pos;
                             shape.effect = .{ .hovered = .{ .fadeout = HOVER_FADEOUT_SECS } };
                             break :cont; // not clicked
                         }
@@ -234,10 +250,18 @@ fn runLevel() bool {
                     .dest_grid_pos = other_pos,
                 }) catch @panic("too many merging shapes");
                 clicked.* = .{ .creation_t = core.t };
+            } else {
+                wrong_choice_timer = 0;
+                for (&level.grid) |*column| {
+                    for (column) |*shape| {
+                        shape.clickable = false;
+                        shape.effect = .none;
+                    }
+                }
             }
 
             // Update moving shapes
-            {
+            if (game_over_t == null) {
                 var i: usize = level.merging_squares.items.len;
                 while (i > 0) {
                     i -= 1;
@@ -282,9 +306,6 @@ fn runLevel() bool {
                 }
             }
 
-            // Update HUD
-            {}
-
             // Remove finished sound effects
             {
                 var i: usize = level.sfx.items.len;
@@ -323,45 +344,47 @@ fn runLevel() bool {
             }
 
             // Draw lines between similar hexagons
-            inline for (0..level.grid.len) |grid_x| {
-                inline for (0..level.grid[0].len) |grid_y| next_shape: { // can't use "continue" because of "inline"
-                    const shape = level.grid[grid_x][grid_y];
-                    const shape_pos = gridCenter(.{ .x = grid_x, .y = grid_y });
-                    if (shape.kind != .hexagon) break :next_shape;
+            if (game_over_t == null) {
+                inline for (0..level.grid.len) |grid_x| {
+                    inline for (0..level.grid[0].len) |grid_y| next_shape: { // can't use "continue" because of "inline"
+                        const shape = level.grid[grid_x][grid_y];
+                        const shape_pos = gridCenter(.{ .x = grid_x, .y = grid_y });
+                        if (shape.kind != .hexagon) break :next_shape;
 
-                    for (RIGHT_DOWN) |dir| {
-                        const dx, const dy = dir;
-                        var x: i16 = grid_x;
-                        var y: i16 = grid_y;
-                        x += dx;
-                        y += dy;
-                        if (x == COLUMN_COUNT or y == ROW_COUNT) continue;
-                        std.debug.assert((x >= 1 and y >= 1) or ((x == 0) != (y == 0)));
-                        std.debug.assert(x < COLUMN_COUNT);
-                        std.debug.assert(y < ROW_COUNT);
+                        for (RIGHT_DOWN) |dir| {
+                            const dx, const dy = dir;
+                            var x: i16 = grid_x;
+                            var y: i16 = grid_y;
+                            x += dx;
+                            y += dy;
+                            if (x == COLUMN_COUNT or y == ROW_COUNT) continue;
+                            std.debug.assert((x >= 1 and y >= 1) or ((x == 0) != (y == 0)));
+                            std.debug.assert(x < COLUMN_COUNT);
+                            std.debug.assert(y < ROW_COUNT);
 
-                        const other = level.grid[@intCast(x)][@intCast(y)];
-                        if (adjacentShapesCanChain(shape, other)) {
-                            const other_pos = gridCenter(.{ .x = @intCast(x), .y = @intCast(y) });
-                            const thickness: f32 = 6;
-                            const color1 = shape.color;
-                            const color2 = other.color;
-                            switch (dy) {
-                                // Left to right
-                                0 => draw.rectangleGradient(.{
-                                    .x = shape_pos.x,
-                                    .y = shape_pos.y - thickness / 2,
-                                    .width = other_pos.x - shape_pos.x,
-                                    .height = thickness,
-                                }, color1, color1, color2, color2),
-                                // Top to bottom
-                                1 => draw.rectangleGradient(.{
-                                    .x = shape_pos.x - thickness / 2,
-                                    .y = shape_pos.y,
-                                    .width = thickness,
-                                    .height = other_pos.y - shape_pos.y,
-                                }, color1, color2, color2, color1),
-                                else => unreachable,
+                            const other = level.grid[@intCast(x)][@intCast(y)];
+                            if (adjacentShapesCanChain(shape, other)) {
+                                const other_pos = gridCenter(.{ .x = @intCast(x), .y = @intCast(y) });
+                                const thickness: f32 = 6;
+                                const color1 = shape.color;
+                                const color2 = other.color;
+                                switch (dy) {
+                                    // Left to right
+                                    0 => draw.rectangleGradient(.{
+                                        .x = shape_pos.x,
+                                        .y = shape_pos.y - thickness / 2,
+                                        .width = other_pos.x - shape_pos.x,
+                                        .height = thickness,
+                                    }, color1, color1, color2, color2),
+                                    // Top to bottom
+                                    1 => draw.rectangleGradient(.{
+                                        .x = shape_pos.x - thickness / 2,
+                                        .y = shape_pos.y,
+                                        .width = thickness,
+                                        .height = other_pos.y - shape_pos.y,
+                                    }, color1, color2, color2, color1),
+                                    else => unreachable,
+                                }
                             }
                         }
                     }
@@ -388,14 +411,20 @@ fn runLevel() bool {
                         .height = SELECT_HEIGHT,
                     }, bg_color);
                     const SPAWN_ANIM_FRAMES = 1 * FRAMES_PER_SEC;
+                    const GAME_OVER_ANIM_FRAMES = 1 * FRAMES_PER_SEC;
                     drawShape(shape, center, .{
-                        .scale = @min(util.toF32(core.t - shape.creation_t) / SPAWN_ANIM_FRAMES, 1.0),
+                        .scale = if (game_over_t) |got|
+                            @max(1.0 - util.toF32(core.t - got) / GAME_OVER_ANIM_FRAMES, 0.0)
+                        else
+                            @min(util.toF32(core.t - shape.creation_t) / SPAWN_ANIM_FRAMES, 1.0),
                     });
                 }
             }
 
-            for (level.merging_squares.items) |merging| {
-                drawShape(merging.shape, merging.position, .{});
+            if (game_over_t == null) {
+                for (level.merging_squares.items) |merging| {
+                    drawShape(merging.shape, merging.position, .{});
+                }
             }
             for (level.scoring_hexagons.items) |scoring| {
                 const pos = scoring.position;
@@ -493,12 +522,36 @@ fn runLevel() bool {
                 }
             }
 
-            // Draw pause menu
-            if (core.isPaused()) {
-                draw.rectangle(.init(0, 0, game_width, game_height), Color.gray.alpha(0.2));
-                core.menus.drawMenu(text_texture);
-                rl.beginTextureMode(game_texture);
+            if (show_restart_button) {
+                const brightness_modifier: f32 = if (restart_button_is_hovered) 0.3 else 0.0;
+                draw.rectangle(
+                    RESTART_BUTTON_RECT,
+                    Color.green.brightness(brightness_modifier),
+                );
+                draw.rectangleLines(
+                    RESTART_BUTTON_RECT,
+                    SHAPE_OUTLINE_THICKNESS,
+                    Color.dark_green.brightness(brightness_modifier),
+                );
+                const text = "Play Again";
+                const font_size = assets.en_font_size / 2;
+                const text_size = windowing.textSize(text, font_size);
+                _ = draw.textHighRes(
+                    text,
+                    RESTART_BUTTON_RECT.x + (RESTART_BUTTON_RECT.width - text_size.x) / 2,
+                    RESTART_BUTTON_RECT.y + (RESTART_BUTTON_RECT.height - text_size.y) / 2,
+                    assets.font,
+                    font_size,
+                    .white,
+                    .{
+                        .kind = .{ .outline = SHAPE_OUTLINE_COLOR.brightness(brightness_modifier) },
+                        .scale = SHAPE_OUTLINE_THICKNESS / 2,
+                    },
+                );
             }
+
+            // Draw pause menu (none)
+            std.debug.assert(!core.isPaused());
 
             // Draw debug
             if (debug.misc) {}
