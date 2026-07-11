@@ -1,0 +1,2 @@
+- Build for web
+- Disable exit key if web

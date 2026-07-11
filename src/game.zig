@@ -550,9 +550,6 @@ fn runLevel() bool {
                 );
             }
 
-            // Draw pause menu (none)
-            std.debug.assert(!core.isPaused());
-
             // Draw debug
             if (debug.misc) {}
         }
@@ -773,13 +770,13 @@ pub const LevelState = struct {
         if (!in_array) {
             level.sfx.appendBounded(sound) catch |e| switch (e) {
                 error.OutOfMemory => {
-                    std.debug.print("Can't add sfx '{s}': already at max\n", .{assets.fetchSoundName(sound)});
-                    std.debug.print(" sfx in buffer: ", .{});
+                    std.log.err("Can't add sfx '{s}': already at max\n", .{assets.fetchSoundName(sound)});
+                    std.log.err(" sfx in buffer: ", .{});
                     for (0..level.sfx.items.len) |i| {
-                        if (i > 0) std.debug.print(", ", .{});
-                        std.debug.print("{s}", .{assets.fetchSoundName(level.sfx.items[i])});
+                        if (i > 0) std.log.err(", ", .{});
+                        std.log.err("{s}", .{assets.fetchSoundName(level.sfx.items[i])});
                     }
-                    std.debug.print("\n", .{});
+                    std.log.err("\n", .{});
                     return error.OutOfMemory;
                 },
             };

@@ -1,7 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const rl = @import("raylib");
-const i18n = @import("internationalization.zig");
 
 // These are initialized at the start and valid for the whole program.
 /// The main English font.
@@ -12,16 +11,7 @@ pub var alt_font: rl.Font = undefined;
 pub var textures: AssetMap(rl.Texture, null) = undefined;
 pub var sounds: AssetMap(rl.Sound, null) = undefined;
 
-pub const fonts_by_lang = i18n.Multilingual(*const rl.Font).init(.{
-    .en = &font,
-});
 pub const en_font_size = 32;
-pub const font_size_by_lang = i18n.Multilingual(f32).init(.{
-    .en = en_font_size,
-});
-pub const line_scale_by_lang = i18n.Multilingual(f32).init(.{
-    .en = 1.5,
-});
 
 pub fn fetchSoundName(sound: rl.Sound) []const u8 {
     var iter = sounds.inner.iterator();

@@ -118,12 +118,12 @@ pub fn readerTakeDelimiterExclusive(reader: *std.io.Reader, delimiter: u8) std.i
 
 /// Prints a newline.
 pub fn printBuf(comptime T: type, comptime item_fmt: []const u8, buf: []const T) void {
-    std.debug.print("[", .{});
+    std.log.debug("[", .{});
     for (0..buf.len) |i| {
-        if (i > 0) std.debug.print(", ", .{});
-        std.debug.print(item_fmt, .{buf[i]});
+        if (i > 0) std.log.debug(", ", .{});
+        std.log.debug(item_fmt, .{buf[i]});
     }
-    std.debug.print("]\n", .{});
+    std.log.debug("]\n", .{});
 }
 
 pub const AssertionMode = enum {
@@ -134,7 +134,7 @@ pub const AssertionMode = enum {
         .panic => noreturn,
     } {
         switch (mode) {
-            .print => std.debug.print(fmt ++ "\n", args),
+            .print => std.log.debug(fmt ++ "\n", args),
             .panic => std.debug.panic(fmt, args),
         }
     }
@@ -170,18 +170,18 @@ pub fn expectMemEq(comptime T: type, a: []const T, b: []const T, comptime item_f
     if (!std.mem.eql(T, a, b)) {
         inline for ([_]struct { []const u8, []const T, []const T }{ .{ "a", a, b }, .{ "b", b, a } }) |item| {
             const name, const buf, const other_buf = item;
-            std.debug.print("{s}: ", .{name});
-            std.debug.print(
+            std.log.debug("{s}: ", .{name});
+            std.log.debug(
                 "[{s}{}{s}]" ++ @typeName(T) ++ "{{",
                 .{ if (other_buf.len == buf.len) start_green else start_red, buf.len, reset_color },
             );
             for (0..buf.len) |i| {
-                std.debug.print(
+                std.log.debug(
                     "{s}" ++ item_fmt,
                     .{ if (other_buf.len > i and other_buf[i] == buf[i]) start_green else start_red, buf[i] },
                 );
             }
-            std.debug.print(reset_color ++ "}}" ++ "\n", .{});
+            std.log.debug(reset_color ++ "}}" ++ "\n", .{});
         }
         mode.maybePanic("a != b; see above", .{});
     }

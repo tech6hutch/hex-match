@@ -386,7 +386,6 @@ pub fn drawEntity(ent: *Entity) void {
         textureRec(ent.sprite_sheet.texture, dest, .{ .source = ent.sheetRect() });
     }
 
-    if (core.isPaused()) return;
     if (debug.animation_disabled) {
         if (!debug.animation_advance_once) return;
         debug.animation_advance_once = false;

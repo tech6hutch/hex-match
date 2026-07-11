@@ -6,13 +6,13 @@ pub const assets = @import("assets.zig");
 pub const audio = @import("audio.zig");
 pub const draw = @import("draw.zig");
 pub const inputs = @import("inputs.zig");
-pub const i18n = @import("internationalization.zig");
-pub const level_format = @import("level_format.zig");
 pub const math = @import("math.zig");
-pub const menus = @import("menus.zig");
 pub const util = @import("util.zig");
 pub const windowing = @import("windowing.zig");
 const Vector2 = math.Vector2;
+const _main = @import("../main.zig");
+const is_web = _main.is_web;
+const IoOrNothing = _main.IoOrNothing;
 
 pub const debug = struct {
     /// Enables various debugging things. Should be set to false for release builds.
@@ -45,20 +45,31 @@ pub const FRAME_DELTA = 1.0 / 120.0;
 pub var t: u32 = 0;
 /// Call setup() before using.
 pub var rng: std.Random = undefined;
-var rng_impl: std.Random.IoSource = undefined;
-pub var lang: i18n.Lang = .en;
+var rng_impl: if (is_web) std.Random.Xoshiro256 else std.Random.IoSource = undefined;
+pub var lang: enum { en } = .en;
 
 /// Returns an error message if anything went wrong.
 pub fn setup(
-    io: std.Io,
+    io: IoOrNothing,
     window_title: [:0]const u8,
     font_path: [:0]const u8,
     comptime texture_names: []const []const u8,
     comptime sound_names: []const []const u8,
-    localizations_path: ?[]const u8,
+    comptime localizations_path: ?[]const u8,
 ) ?[:0]const u8 {
-    rng_impl = .{ .io = io };
-    rng = rng_impl.interface();
+    if (is_web) {
+        rng_impl = std.Random.DefaultPrng.init(blk: {
+            var seed: u64 = undefined;
+            for (std.mem.asBytes(&seed)) |*byte| {
+                byte.* = @trunc(@max(0.0, @min(255.0, std.os.emscripten.emscripten_random() * 256)));
+            }
+            break :blk seed;
+        });
+        rng = rng_impl.random();
+    } else {
+        rng_impl = .{ .io = io };
+        rng = rng_impl.interface();
+    }
 
     rl.setTraceLogLevel(.warning);
     rl.setConfigFlags(.{ .window_resizable = true });
@@ -102,15 +113,10 @@ pub fn setup(
         );
     }
 
-    std.debug.print("Loaded {d} textures and {d} sounds\n", .{ assets.textures.inner.size, assets.sounds.inner.size });
+    std.log.info("Loaded {d} textures and {d} sounds\n", .{ assets.textures.inner.size, assets.sounds.inner.size });
 
-    if (localizations_path) |path| {
-        i18n.loadCsvFile(io, c_allocator, path) catch |e| {
-            std.debug.print("Error loading translations: {t}\n", .{e});
-            return
-            \\Failed to load translations.
-            ;
-        };
+    if (localizations_path) |_| {
+        @compileError("i18n not supported (because Zig's Io breaks web builds)");
     }
 
     return null;
@@ -222,27 +228,6 @@ pub const Timer = struct {
     }
 };
 
-pub fn getCameraMinMax(
-    level_orientation: level_format.LevelOrientation,
-    level_width_in_tiles: i16,
-    level_height_in_tiles: i16,
-) struct { Vector2, Vector2 } {
-    const camera_screen_offset = switch (level_orientation) {
-        .horizontal => Vector2{
-            .x = 0,
-            .y = if (game_size_in_tiles.y % 2 == 0) 0 else 4, // half a block to center it vertically
-        },
-        .vertical => Vector2{
-            .x = 0,
-            .y = 0,
-        },
-    };
-    const camera_min = game_center.add(camera_screen_offset);
-    const camera_max = level_format.TilePosition.toPixelsTopLeft(.{ .x = level_width_in_tiles, .y = level_height_in_tiles })
-        .subtract(game_center);
-    return .{ camera_min, camera_max };
-}
-
 /// Simple, four-way camera movement (in 2D).
 pub fn cameraFollowEnt(ent: Entity, ent_old_pos: Vector2, camera: *rl.Camera2D, camera_min: Vector2, camera_max: Vector2) void {
     const delta = ent.position().subtract(ent_old_pos);
@@ -258,25 +243,13 @@ pub fn cameraFollowEnt(ent: Entity, ent_old_pos: Vector2, camera: *rl.Camera2D, 
     camera.target = camera.target.clamp(camera_min, camera_max);
 }
 
-pub fn pause() void {
-    std.debug.assert(menus.stack.items.len == 0); // pause called when already paused?
-    menus.open(menus.pause_menu.top_def);
-}
-pub fn unpause() void {
-    menus.close();
-}
-/// Whether gameplay should pause (whether there's a menu open, of any kind).
-pub fn isPaused() bool {
-    return menus.stack.items.len > 0;
-}
-
 //
 // Debugging
 //
 
 /// Adds a newline.
 pub fn logError(comptime prefix: []const u8, comptime fmt: []const u8, args: anytype) void {
-    std.debug.print(prefix ++ ": " ++ fmt ++ "\n", args);
+    std.log.err(prefix ++ ": " ++ fmt ++ "\n", args);
 }
 
 /// Wrap the value in a printable type.
