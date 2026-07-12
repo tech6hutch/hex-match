@@ -42,12 +42,17 @@ pub fn build(b: *std.Build) !void {
     if (is_web) {
         const emsdk = rlz.emsdk;
         const wasm = b.addLibrary(.{
-            .name = exe_name,
+            .name = "index",
             .root_module = exe_mod,
         });
 
-        const emcc_flags = emsdk.emccDefaultFlags(b.allocator, .{ .optimize = optimize });
-        const emcc_settings = emsdk.emccDefaultSettings(b.allocator, .{ .optimize = optimize });
+        const emcc_flags = emsdk.emccDefaultFlags(b.allocator, .{
+            .optimize = optimize,
+            .asyncify = false,
+        });
+        const emcc_settings = emsdk.emccDefaultSettings(b.allocator, .{
+            .optimize = optimize,
+        });
 
         const emcc_step = emsdk.emccStep(b, raylib_c, wasm, .{
             .optimize = optimize,

@@ -1,5 +1,4 @@
 const std = @import("std");
-const c_allocator = std.heap.c_allocator;
 const rl = @import("raylib");
 const core = @import("engine/core.zig");
 const game = @import("game.zig");
@@ -57,7 +56,7 @@ fn _main(io: IoOrNothing) !void {
         null,
     );
     if (setup_err_msg) |err_msg| {
-        game.showError(err_msg);
+        if (!is_web) game.showError(err_msg);
         return;
     }
 

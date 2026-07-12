@@ -84,8 +84,7 @@ pub fn setup(
         rl.initWindow(window_width, window_height, window_title);
     }
     rl.setTargetFPS(FRAMES_PER_SEC);
-    // TODO: only remove exit key if web build
-    // rl.setExitKey(.null);
+    if (is_web) rl.setExitKey(.null);
 
     assets.font = rl.loadFont(font_path) catch return
         \\Failed to load font.
