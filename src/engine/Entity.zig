@@ -11,9 +11,6 @@ const Entity = @This();
 // this list (higher in value).
 pub const FoeKind = enum(u8) {
     not_a_foe,
-    box,
-    turtle,
-    bump,
 
     pub fn format(kind: FoeKind, writer: anytype) !void {
         const count = std.enums.values(FoeKind).len;
@@ -29,36 +26,6 @@ pub const FoeKind = enum(u8) {
 };
 pub const FoeData = union(FoeKind) {
     not_a_foe,
-    box: struct {
-        /// 0 to box_kind_count - 1.
-        kind: u3,
-    },
-    turtle: struct {
-        unflip_timer: core.Timer = .withDurationInSecs(6),
-    },
-    bump: struct {
-        /// The region outside of which to cut off the sprite. No top (use 0).
-        clip: struct { bottom: i32, left: i32, right: i32 },
-        /// The entity that bumped the platform.
-        cause: BumpCause,
-        /// The index in the bump array.
-        index: u8,
-    },
-
-    pub const box_kind_count = 6; // (2026-01-25)
-    pub var box_colors: [box_kind_count]core.draw.Color = [_]core.draw.Color{.black} ** box_kind_count;
-
-    pub const BumpCause = union(enum) {
-        player,
-        foe: core.EntityRef,
-        pub fn eql(a: BumpCause, b: BumpCause) bool {
-            if (std.meta.activeTag(a) != std.meta.activeTag(b)) return false;
-            return switch (a) {
-                .player => true,
-                .foe => a.foe.id == b.foe.id,
-            };
-        }
-    };
 
     pub fn format(kind: FoeData, writer: anytype) !void {
         try FoeKind.format(kind, writer);
@@ -112,44 +79,6 @@ is: packed struct {
         return if (flags.facing_left) flags.left_on_wall else flags.right_on_wall;
     }
 } = .{},
-flipping: enum(u2) { none, horizontally, vertically } = .none,
-
-/// Generally, an entity should respond to this by toggling `upside_down` (after an animation).
-just_bumped: ?struct {
-    /// The middle of the bump.
-    bump_x: f32,
-} = null,
-
-// Reasoning for how `last_collided_ent` works:
-//
-// Collisions between the player and other things are, obviously, a one-to-many relationship. So, we
-// want to record collisions on the "many" (i.e., on the entity that's not the player) so we don't
-// miss any if multiple happen in the same frame. Since the player's foe_kind is 0, it's always the
-// lower one.
-// There are other ways this could be implemented (e.g., just checking specifically for the player),
-// but it's also nice to have "Which entity's code will handle this collision?" be a question with a
-// defined answer.
-//
-// When a new collision happens and the entity (the one on which it's recorded) still has an
-// unhandled collision (e.g. if multiple collisions happened in a single frame), then the one with
-// the lower foe_kind is saved, again in deference to the player.
-
-/// The last entity collided with. If none, `last_collided_ent.id == .none`. Set
-/// it to none after handling the collision.
-///
-/// To prevent redundancy, this gets set on only one of the entities involved in
-/// the collision: the one with a higher foe_kind.
-last_collided_ent: struct {
-    id: core.EntityId,
-    /// Used for prioritization when there's a new collision but the old one hasn't been
-    /// handled yet (lower is kept, higher is ignored). Undefined if `id == .none`.
-    foe_kind: FoeKind,
-    /// Velocity at the time of impact. Undefined if `id == .none`.
-    velocity: Vector2,
-} = .{ .id = .none, .foe_kind = undefined, .velocity = undefined },
-
-/// Don't change this directly, go through grab() and unGrab().
-held_item: core.EntityRef = .{},
 
 //
 // Methods
@@ -201,24 +130,6 @@ pub fn applyFriction(ent: *Entity) void {
     ent.sx = util.moveTowardsF(ent.sx, 0, friction);
 }
 
-/// The appropriate position of things carried by this entity.
-pub fn getHoldingPosition(ent: Entity) Vector2 {
-    return .init(ent.x, ent.collisionRect().y - 1);
-}
-
-/// Assumes that the item isn't already being held by another entity.
-pub fn grab(self: *Entity, item: *Entity) void {
-    self.held_item = .{ .id = item.id };
-    item.is.held = true;
-    item.setPosition(self.getHoldingPosition());
-}
-/// Asserts that the entity is currently holding the item.
-pub fn unGrab(self: *Entity, item: *Entity) void {
-    std.debug.assert(self.held_item.id == item.id);
-    self.held_item = .{};
-    item.is.held = false;
-}
-
 /// Collision boxes are floored, so this is only accurate within 1px.
 pub fn isOverlapping(a: Entity, b: Entity) bool {
     for (core.getRectScreenWrapped(a.collisionRect())) |a_rec| {
@@ -226,15 +137,6 @@ pub fn isOverlapping(a: Entity, b: Entity) bool {
         if (math.checkCollisionRecs(a_rec, b.collisionRect())) return true;
     }
     return false;
-}
-
-pub const StompOptions = struct {
-    require_anim: ?Anim,
-};
-pub fn isStomping(a: Entity, b: Entity, options: StompOptions) bool {
-    return a.isOverlapping(b) and
-        a.sy > 0 and a.y <= b.centerPosition().y and
-        if (options.require_anim) |anim| a.animation.equals(anim) else true;
 }
 
 /// Returns the entity's collision box, floored.

@@ -624,10 +624,8 @@ const game = @This();
 
 //
 // Level Stuff
-// todo: might move this stuff (except the var) to its own file. probably rename levels_raw to LevelData.
 //
 
-// todo: should probably make this optional instead, it's safer. ".?" isn't a big deal.
 pub var level: LevelState = undefined;
 
 pub const LevelState = struct {
@@ -656,7 +654,6 @@ pub const LevelState = struct {
 
     game_texture: draw.RenderTexture,
 
-    /// todo: this will go away once `game.level` is made nullable.
     _defined_check: bool = true,
 
     pub var is_defined: bool = false;

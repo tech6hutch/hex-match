@@ -69,49 +69,6 @@ pub const pico8_colors = struct {
     pub const mauve = rl.Color.init(117, 70, 101, 255); // #754665
     pub const dark_peach = rl.Color.init(255, 110, 89, 255); // #FF6E59
     pub const peach = rl.Color.init(255, 157, 129, 255); // #FF9D81
-
-    pub var palette_map: ?std.AutoHashMap(rl.Color, rl.Color) = null;
-    pub fn set_up_map(allocator: std.mem.Allocator) std.mem.Allocator.Error!void {
-        palette_map = .init(allocator);
-        try palette_map.?.ensureTotalCapacity(16);
-        for (&[16]struct { rl.Color, rl.Color }{
-            .{ black, brownish_black },
-            .{ dark_blue, darker_blue },
-            .{ dark_purple, darker_purple },
-            .{ dark_green, blue_green },
-            .{ brown, dark_brown },
-            .{ dark_grey, darker_grey },
-            .{ light_grey, medium_grey },
-            .{ white, light_yellow },
-            .{ red, dark_red },
-            .{ orange, dark_orange },
-            .{ yellow, lime_green },
-            .{ green, medium_green },
-            .{ blue, true_blue },
-            .{ lavender, mauve },
-            .{ pink, dark_peach },
-            .{ light_peach, peach },
-        }) |kv| {
-            const normal, const hidden = kv;
-            palette_map.?.putAssumeCapacityNoClobber(normal, hidden);
-        }
-    }
-
-    pub fn convertTextureToAltPalette(texture: rl.Texture) rl.RaylibError!rl.Texture {
-        const map = palette_map orelse @panic("call set_up_map() first");
-        var image = try rl.loadImageFromTexture(texture);
-        // todo: should I unload the image, or does it become part of the texture?
-        var x: i32 = 0;
-        while (x < image.width) : (x += 1) {
-            var y: i32 = 0;
-            while (y < image.height) : (y += 1) {
-                if (map.get(rl.getImageColor(image, x, y))) |alt_color| {
-                    image.drawPixel(x, y, alt_color);
-                }
-            }
-        }
-        return try rl.loadTextureFromImage(image);
-    }
 };
 
 //
