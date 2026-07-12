@@ -626,7 +626,7 @@ const game = @This();
 // Level Stuff
 //
 
-pub var level: LevelState = undefined;
+pub var level: *LevelState = undefined;
 
 pub const LevelState = struct {
     grid: [COLUMN_COUNT][ROW_COUNT]Shape = @splat(@splat(Shape{ .creation_t = 0 })),
@@ -682,7 +682,8 @@ pub const LevelState = struct {
 
     pub fn init() void {
         is_defined = true;
-        level = .{
+        level = c_allocator.create(LevelState) catch @panic("OOM");
+        level.* = .{
             .bg_hue = Color.red.toHSV().x,
             .game_texture = rl.loadRenderTexture(game_width, game_height) catch @panic("failed to load render texture"),
         };

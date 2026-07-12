@@ -86,13 +86,18 @@ pub fn setup(
     rl.setTargetFPS(FRAMES_PER_SEC);
     if (is_web) rl.setExitKey(.null);
 
-    assets.font = rl.loadFont(font_path) catch return
-        \\Failed to load font.
-        \\
-        \\Make sure you extracted them.
-    ;
+    // Doesn't work on web? (2026-07-12)
+    assets.font = if (is_web)
+        rl.getFontDefault() catch @panic("couldn't load default font")
+    else
+        rl.loadFont(font_path) catch return
+            \\Failed to load font.
+            \\
+            \\Make sure you extracted them.
+        ;
 
-    rl.initAudioDevice(); // must be init'd before loading sounds
+    // Doesn't work on web? (2026-07-12)
+    // rl.initAudioDevice(); // must be init'd before loading sounds
 
     assets.textures = @TypeOf(assets.textures).init(c_allocator, texture_names) catch @panic("OOM");
     inline for (texture_names) |name| {
